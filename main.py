@@ -23,7 +23,7 @@ BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 app = Client("line_calc_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 def count_srt_blocks(file_path):
-    """SRT ဖိုင်ထဲက အမှန်တကယ် ရှိသော Subtitle Block အရေအတွက် (ဥပမာ- 673) ကို ရေတွက်ခြင်း"""
+    """SRT ဖိုင်ထဲက အမှန်တကယ် ရှိသော Subtitle Block အရေအတွက်ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
 
@@ -48,7 +48,7 @@ async def check_file_lines(client: Client, message: Message):
                 total_lines = len([line for line in f.readlines() if line.strip()])
 
         reply_text = (
-            f"📄 **ဖိုင်နာမည်:** `{doc.file_name}`\n"
+            f"📄 **File Name:** `{doc.file_name}`\n"
             f"📊 **စုစုပေါင်း စာကြောင်းရေ:** `{total_lines}` lines\n\n"
             f"💡 **လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?**\n"
             f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - `5`) လို့ ရိုက်ထည့်ပေးပါ။"
@@ -79,6 +79,11 @@ async def calculate_line_split(client: Client, message: Message):
         await message.reply_text("❌ လူဦးရေသည် 1 ယောက်ထက် ပိုရပါမည်။")
         return
 
+    # ဖိုင်နာမည် ဖမ်းထုတ်ခြင်း
+    file_name_match = re.search(r"File Name:\s*`([^`]+)`", replied_msg.text)
+    file_name = file_name_match.group(1) if file_name_match else "Subtitle File"
+
+    # စာကြောင်းရေ ဖမ်းထုတ်ခြင်း
     match = re.search(r"စုစုပေါင်း စာကြောင်းရေ:\s*`?(\d+)`?", replied_msg.text)
     if not match:
         await message.reply_text("❌ စာကြောင်းရေ တွက်ချက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။")
@@ -87,20 +92,22 @@ async def calculate_line_split(client: Client, message: Message):
     total_lines = int(match.group(1))
     lines_per_person = math.ceil(total_lines / num_people)
 
-    result_msg = f"📊 **စုစုပေါင်း:** `{total_lines}` Lines\n"
-    result_msg += f"👥 **လူဦးရေ:** `{num_people}` ယောက်\n\n"
+    # ခေါင်းစဉ်နှင့် ဖိုင်နာမည် ပါဝင်သော Format
+    result_msg = f"🎬 **{file_name}**\n"
+    result_msg += "━━━━━━━━━━━━━━━━━━━\n"
+    result_msg += f"📊 **Total Lines:** `{total_lines}`\n"
+    result_msg += f"👥 **Total People:** `{num_people}` (`~{lines_per_person}` lines/person)\n"
+    result_msg += "━━━━━━━━━━━━━━━━━━━\n\n"
 
-    # အင်္ဂလိပ် စာလုံးအက္ခရာများ (a, b, c, d, ...)
     alphabet = "abcdefghijklmnopqrstuvwxyz"
-
     current_start = 1
+
     for i in range(1, num_people + 1):
         current_end = current_start + lines_per_person - 1
         
         if i == num_people or current_end > total_lines:
             current_end = total_lines
 
-        # Alphabet Label ထည့်ခြင်း (a, b, c, ...)
         label = f"({alphabet[(i - 1) % 26]})"
         
         result_msg += f"`{label} {current_start} - {current_end}`  --> \n"
