@@ -4,10 +4,10 @@ import math
 import asyncio
 from flask import Flask
 from threading import Thread
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
-# Web Server Configuration for Render Port Check
+# Web Server Configuration for Render
 web_app = Flask('')
 
 @web_app.route('/')
@@ -38,7 +38,7 @@ def count_srt_blocks(file_path):
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
-@app.on_message(filters.document)
+@app.on_message(filters.document & filters.private)
 async def check_file_lines(client: Client, message: Message):
     doc = message.document
     if not (doc.file_name.endswith('.txt') or doc.file_name.endswith('.srt')):
@@ -71,7 +71,7 @@ async def check_file_lines(client: Client, message: Message):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-@app.on_message(filters.reply & filters.text)
+@app.on_message(filters.reply & filters.text & filters.private)
 async def calculate_line_split(client: Client, message: Message):
     replied_msg = message.reply_to_message
     raw_text = replied_msg.text or replied_msg.caption or ""
@@ -126,15 +126,14 @@ async def calculate_line_split(client: Client, message: Message):
     await message.reply_text(result_msg)
 
 async def main():
-    # Flask Web Server ကို Thread သီးသန့်ဖြင့် စတင်ခြင်း
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    # Pyrogram Bot ကို Async ဖြင့် စတင်ခြင်း
     await app.start()
-    print("Bot is up and running successfully!")
-    await asyncio.Event().wait()
+    print(">>> BOT STARTED SUCCESSFULLY <<<")
+    await idle()
+    await app.stop()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.get_event_loop().run_until_complete(main())
