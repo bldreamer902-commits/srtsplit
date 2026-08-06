@@ -22,27 +22,14 @@ BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 
 app = Client("line_calc_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-def count_srt_dialogues(file_path):
-    """SRT ဖိုင်ထဲက အချိန်စာကြောင်းတွေ၊ Block နံပါတ်တွေကို ဖယ်ပြီး တကယ့် dialogue စာကြောင်းရေကိုပဲ ရေတွက်ခြင်း"""
-    dialogue_count = 0
+def count_srt_blocks(file_path):
+    """SRT ဖိုင်ထဲက အမှန်တကယ် ရှိသော Subtitle Block အရေအတွက် (ဥပမာ- 673) ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        lines = f.readlines()
+        content = f.read()
 
-    for line in lines:
-        line_str = line.strip()
-        # စာကြောင်းအလွတ်များကို ဖယ်မည်
-        if not line_str:
-            continue
-        # SRT Block Index (ဂဏန်းသန့်သန့်) ကို ဖယ်မည်
-        if line_str.isdigit():
-            continue
-        # Timestamp (00:00:00,000 --> 00:00:00,000) စာကြောင်းများကို ဖယ်မည်
-        if '-->' in line_str:
-            continue
-        
-        dialogue_count += 1
-        
-    return dialogue_count
+    # Timecode ပါဝင်သော Block အရေအတွက်ကို ရေတွက်ခြင်း
+    matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
+    return len(matches)
 
 @app.on_message(filters.document)
 async def check_file_lines(client: Client, message: Message):
@@ -56,7 +43,7 @@ async def check_file_lines(client: Client, message: Message):
 
     try:
         if doc.file_name.endswith('.srt'):
-            total_lines = count_srt_dialogues(file_path)
+            total_lines = count_srt_blocks(file_path)
         else:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = len([line for line in f.readlines() if line.strip()])
