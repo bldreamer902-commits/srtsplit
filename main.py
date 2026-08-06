@@ -27,7 +27,6 @@ def count_srt_blocks(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
 
-    # Timecode ပါဝင်သော Block အရေအတွက်ကို ရေတွက်ခြင်း
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
@@ -89,9 +88,10 @@ async def calculate_line_split(client: Client, message: Message):
     lines_per_person = math.ceil(total_lines / num_people)
 
     result_msg = f"📊 **စုစုပေါင်း:** `{total_lines}` Lines\n"
-    result_msg += f"👥 **လူဦးရေ:** `{num_people}` ယောက် (၁ ယောက်လျှင် ~ `{lines_per_person}` lines)\n\n"
-    result_msg += "✂️ **Line ခွဲဝေမှု စာရင်း -**\n"
-    result_msg += "───────────────\n"
+    result_msg += f"👥 **လူဦးရေ:** `{num_people}` ယောက်\n\n"
+
+    # အင်္ဂလိပ် စာလုံးအက္ခရာများ (a, b, c, d, ...)
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
 
     current_start = 1
     for i in range(1, num_people + 1):
@@ -100,7 +100,10 @@ async def calculate_line_split(client: Client, message: Message):
         if i == num_people or current_end > total_lines:
             current_end = total_lines
 
-        result_msg += f"👤 **Person {i}:** Line `{current_start}` - `{current_end}`\n"
+        # Alphabet Label ထည့်ခြင်း (a, b, c, ...)
+        label = f"({alphabet[(i - 1) % 26]})"
+        
+        result_msg += f"`{label} {current_start} - {current_end}`  --> \n"
 
         if current_end >= total_lines:
             break
