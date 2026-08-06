@@ -1,7 +1,15 @@
+import asyncio
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 import os
 import math
 from pyrogram import Client, filters
 from pyrogram.types import Message
+
+# ... ကျန်တဲ့ Bot Code တွေအတိုင်း ဆက်ထားပါ ...
 
 API_ID = 33140158  # အစ်ကို့ API ID
 API_HASH = "936e6187972a97c9f9b616516f24b61c" # အစ်ကို့ API Hash
