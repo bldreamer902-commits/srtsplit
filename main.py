@@ -1,33 +1,30 @@
 import os
 import math
 import asyncio
-from threading import Thread
 from flask import Flask
+from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-# Render Port Error မတက်အောင် Dummy Web Server ဆောက်ခြင်း
+# Render Port Error မတက်အောင် Web Server သေးသေးလေး ဆောက်ခြင်း
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot is running!"
+    return "Bot is active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host='0.0.0.0', port=port)
 
-def keep_alive():
-    t = Thread(target=run_web)
-    t.daemon = True
-    t.start()
-
-API_ID = 33140158  # အစ်ကို့ API ID
-API_HASH = "936e6187972a97c9f9b616516f24b61c" # အစ်ကို့ API Hash
-BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o" # အစ်ကို့ Bot Token
+# Credentials
+API_ID = 33140158
+API_HASH = "936e6187972a97c9f9b616516f24b61c"
+BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 
 app = Client("line_calc_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# 1. စာဖိုင်ပို့လိုက်ရင် စာကြောင်းရေ ဖတ်ပေးမည့် Handler
 @app.on_message(filters.document)
 async def check_file_lines(client: Client, message: Message):
     doc = message.document
@@ -60,6 +57,7 @@ async def check_file_lines(client: Client, message: Message):
         if os.path.exists(file_path):
             os.remove(file_path)
 
+# 2. ပြန်လာမယ့် Reply ကို တွက်ချက်ပေးမည့် Handler
 @app.on_message(filters.reply & filters.text)
 async def calculate_line_split(client: Client, message: Message):
     replied_msg = message.reply_to_message
@@ -106,13 +104,11 @@ async def calculate_line_split(client: Client, message: Message):
 
     await message.reply_text(result_msg)
 
-async def main():
-    keep_alive()  # Web Server စတင်ဖွင့်ခြင်း
-    await app.start()
-    print("Bot started successfully!")
-    await asyncio.Event().wait()
-
 if __name__ == "__main__":
-    asyncio.run(main())
-if __name__ == "__main__":
+    # Flask app ကို Thread သီးသန့်နဲ့ Run မည်
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+    
+    # Pyrogram Bot ကို Run မည်
     app.run()
