@@ -47,9 +47,10 @@ async def check_file_lines(client: Client, message: Message):
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = len([line for line in f.readlines() if line.strip()])
 
+        # ဖိုင်နာမည် ရော စာကြောင်းရေပါ သေချာ ပုံစံထုတ်ပေးထားသည်
         reply_text = (
-            f"📄 **File Name:** `{doc.file_name}`\n"
-            f"📊 **စုစုပေါင်း စာကြောင်းရေ:** `{total_lines}` lines\n\n"
+            f"📄 **File:** `{doc.file_name}`\n"
+            f"📊 **Total:** `{total_lines}` lines\n\n"
             f"💡 **လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?**\n"
             f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - `5`) လို့ ရိုက်ထည့်ပေးပါ။"
         )
@@ -66,7 +67,7 @@ async def check_file_lines(client: Client, message: Message):
 @app.on_message(filters.reply & filters.text)
 async def calculate_line_split(client: Client, message: Message):
     replied_msg = message.reply_to_message
-    if not replied_msg.text or "စုစုပေါင်း စာကြောင်းရေ:" not in replied_msg.text:
+    if not replied_msg.text or "Total:" not in replied_msg.text:
         return
 
     num_text = message.text.strip()
@@ -79,12 +80,12 @@ async def calculate_line_split(client: Client, message: Message):
         await message.reply_text("❌ လူဦးရေသည် 1 ယောက်ထက် ပိုရပါမည်။")
         return
 
-    # ဖိုင်နာမည် ဖမ်းထုတ်ခြင်း
-    file_name_match = re.search(r"File Name:\s*`([^`]+)`", replied_msg.text)
+    # ဖိုင်နာမည် ဖမ်းထုတ်ခြင်း (File: `...` ထဲက စာသားကို ရှာမည်)
+    file_name_match = re.search(r"File:\s*`([^`]+)`", replied_msg.text)
     file_name = file_name_match.group(1) if file_name_match else "Subtitle File"
 
-    # စာကြောင်းရေ ဖမ်းထုတ်ခြင်း
-    match = re.search(r"စုစုပေါင်း စာကြောင်းရေ:\s*`?(\d+)`?", replied_msg.text)
+    # စာကြောင်းရေ ဖမ်းထုတ်ခြင်း (Total: `...` ထဲက ဂဏန်းကို ရှာမည်)
+    match = re.search(r"Total:\s*`?(\d+)`?", replied_msg.text)
     if not match:
         await message.reply_text("❌ စာကြောင်းရေ တွက်ချက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။")
         return
@@ -109,8 +110,7 @@ async def calculate_line_split(client: Client, message: Message):
 
         label = f"({alphabet[(i - 1) % 26]})"
         
-        # စာကြောင်းတစ်ကြောင်းစီကို Backtick ဖြင့် သီးသန့် ပိတ်ပေးထားပါသည်
-        result_msg += f"`{label} {current_start} - {current_end}` -->\n"
+        result_msg += f"`{label} {current_start} - {current_end}`  -->\n"
 
         if current_end >= total_lines:
             break
