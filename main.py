@@ -92,7 +92,6 @@ async def calculate_line_split(client: Client, message: Message):
     total_lines = int(match.group(1))
     lines_per_person = math.ceil(total_lines / num_people)
 
-    # ခေါင်းစဉ်နှင့် ဖိုင်နာမည် ပါဝင်သော Format
     result_msg = f"🎬 **{file_name}**\n"
     result_msg += "━━━━━━━━━━━━━━━━━━━\n"
     result_msg += f"📊 **Total Lines:** `{total_lines}`\n"
@@ -110,7 +109,8 @@ async def calculate_line_split(client: Client, message: Message):
 
         label = f"({alphabet[(i - 1) % 26]})"
         
-        result_msg += f"`{label} {current_start} - {current_end}`  --> \n"
+        # စာကြောင်းတစ်ကြောင်းစီကို Backtick ဖြင့် သီးသန့် ပိတ်ပေးထားပါသည်
+        result_msg += f"`{label} {current_start} - {current_end}` -->\n"
 
         if current_end >= total_lines:
             break
