@@ -1,6 +1,6 @@
 import os
+import re
 import math
-import asyncio
 from flask import Flask
 from threading import Thread
 from pyrogram import Client, filters
@@ -74,12 +74,13 @@ async def calculate_line_split(client: Client, message: Message):
         await message.reply_text("❌ လူဦးရေသည် 1 ယောက်ထက် ပိုရပါမည်။")
         return
 
-    try:
-        lines_line = [line for line in replied_msg.text.split('\n') if "စုစုပေါင်း စာကြောင်းရေ:" in line][0]
-        total_lines = int(lines_line.split('`')[1])
-    except Exception:
+    # Regex သုံး၍ စုစုပေါင်း စာကြောင်းရေ ဂဏန်းကို ရှာဖွေခွဲထုတ်ခြင်း
+    match = re.search(r"စုစုပေါင်း စာကြောင်းရေ:\s*`?(\d+)`?", replied_msg.text)
+    if not match:
         await message.reply_text("❌ စာကြောင်းရေ တွက်ချက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။")
         return
+
+    total_lines = int(match.group(1))
 
     lines_per_person = math.ceil(total_lines / num_people)
 
@@ -105,10 +106,8 @@ async def calculate_line_split(client: Client, message: Message):
     await message.reply_text(result_msg)
 
 if __name__ == "__main__":
-    # Flask app ကို Thread သီးသန့်နဲ့ Run မည်
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
     
-    # Pyrogram Bot ကို Run မည်
     app.run()
