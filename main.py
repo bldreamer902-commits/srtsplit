@@ -6,15 +6,16 @@ from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-# Render Web Port Check အတွက် Flask App
+# Render ရဲ့ Health Check အတွက် Web Server
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot is running 24/7!"
+    return "Bot is alive and running 24/7!"
 
 def run_web():
-    port = int(os.environ.get("PORT", 8080))
+    # Render ရဲ့ Default Port 10000 ကို ဖမ်းမောင်းပေးခြင်း
+    port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
 # Telegram Credentials
@@ -31,7 +32,6 @@ app = Client(
 )
 
 def count_srt_blocks(file_path):
-    """SRT ဖိုင်ထဲက Subtitle Block အရေအတွက်ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
@@ -125,11 +125,8 @@ async def calculate_line_split(client: Client, message: Message):
     await message.reply_text(result_msg)
 
 if __name__ == "__main__":
-    # Flask Web Server ကို သီးသန့် Thread ဖြင့် စတင်ခြင်း
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    # Pyrogram မောင်းနှင်ခြင်း
-    print(">>> BOT IS STARTING NOW <<<")
     app.run()
