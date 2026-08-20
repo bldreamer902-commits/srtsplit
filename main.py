@@ -1,12 +1,13 @@
 import os
 import re
 import math
+import asyncio
 from flask import Flask
 from threading import Thread
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
-# Web Server Configuration for Render
+# Render Health Check Web Server
 web_app = Flask('')
 
 @web_app.route('/')
@@ -31,13 +32,12 @@ app = Client(
 )
 
 def count_srt_blocks(file_path):
-    """SRT ဖိုင်ထဲက Subtitle Block အရေအတွက်ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
-@app.on_message(filters.document & filters.private)
+@app.on_message(filters.document)
 async def check_file_lines(client: Client, message: Message):
     doc = message.document
     if not (doc.file_name.endswith('.txt') or doc.file_name.endswith('.srt')):
@@ -70,7 +70,7 @@ async def check_file_lines(client: Client, message: Message):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-@app.on_message(filters.reply & filters.text & filters.private)
+@app.on_message(filters.reply & filters.text)
 async def calculate_line_split(client: Client, message: Message):
     replied_msg = message.reply_to_message
     raw_text = replied_msg.text or replied_msg.caption or ""
@@ -99,7 +99,6 @@ async def calculate_line_split(client: Client, message: Message):
     total_lines = int(match.group(1))
     lines_per_person = math.ceil(total_lines / num_people)
 
-    # Output Format ကို သန့်ရှင်းစွာ ဖွဲ့စည်းခြင်း
     result_msg = (
         f"🎬 **{file_name}**\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
@@ -117,8 +116,6 @@ async def calculate_line_split(client: Client, message: Message):
             current_end = total_lines
 
         label = f"({alphabet[(i - 1) % 26]})"
-        
-        # လိုင်းခွဲစာသား တစ်ကြောင်းတည်း ပေါ်စေရန်
         result_msg += f"{label} {current_start} - {current_end} > \n"
 
         if current_end >= total_lines:
@@ -128,9 +125,17 @@ async def calculate_line_split(client: Client, message: Message):
 
     await message.reply_text(result_msg)
 
-if __name__ == "__main__":
+async def main():
+    # Flask Server မောင်းနှင်ခြင်း
     t = Thread(target=run_web)
     t.daemon = True
     t.start()
 
-    app.run()
+    # Pyrogram စတင်ခြင်း
+    await app.start()
+    print(">>> BOT STARTED SUCCESSFULLY <<<")
+    await idle()
+    await app.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
