@@ -6,7 +6,7 @@ from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-# Render ရဲ့ Health Check အတွက် Web Server
+# Web Server Configuration for Render
 web_app = Flask('')
 
 @web_app.route('/')
@@ -14,7 +14,6 @@ def home():
     return "Bot is alive and running 24/7!"
 
 def run_web():
-    # Render ရဲ့ Default Port 10000 ကို ဖမ်းမောင်းပေးခြင်း
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
@@ -32,12 +31,13 @@ app = Client(
 )
 
 def count_srt_blocks(file_path):
+    """SRT ဖိုင်ထဲက Subtitle Block အရေအတွက်ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
-@app.on_message(filters.document)
+@app.on_message(filters.document & filters.private)
 async def check_file_lines(client: Client, message: Message):
     doc = message.document
     if not (doc.file_name.endswith('.txt') or doc.file_name.endswith('.srt')):
@@ -70,7 +70,7 @@ async def check_file_lines(client: Client, message: Message):
         if os.path.exists(file_path):
             os.remove(file_path)
 
-@app.on_message(filters.reply & filters.text)
+@app.on_message(filters.reply & filters.text & filters.private)
 async def calculate_line_split(client: Client, message: Message):
     replied_msg = message.reply_to_message
     raw_text = replied_msg.text or replied_msg.caption or ""
@@ -99,11 +99,13 @@ async def calculate_line_split(client: Client, message: Message):
     total_lines = int(match.group(1))
     lines_per_person = math.ceil(total_lines / num_people)
 
-    result_msg = f"🎬 **{file_name}**\n"
-    result_msg += "━━━━━━━━━━━━━━━━━━━\n"
-    result_msg += f"📊 **Total Lines:** `{total_lines}`\n"
-    result_msg += f"👥 **Total People:** `{num_people}` (`~{lines_per_person}` lines/person)\n"
-    result_msg += "━━━━━━━━━━━━━━━━━━━\n\n"
+    # Output Format ကို သန့်ရှင်းစွာ ဖွဲ့စည်းခြင်း
+    result_msg = (
+        f"🎬 **{file_name}**\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 **Total Lines:** {total_lines} ( ~{lines_per_person} lines / each )\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+    )
 
     alphabet = "abcdefghijklmnopqrstuvwxyz"
     current_start = 1
@@ -115,7 +117,9 @@ async def calculate_line_split(client: Client, message: Message):
             current_end = total_lines
 
         label = f"({alphabet[(i - 1) % 26]})"
-        result_msg += f"`{label} {current_start} - {current_end}`  -->\n"
+        
+        # လိုင်းခွဲစာသား တစ်ကြောင်းတည်း ပေါ်စေရန်
+        result_msg += f"{label} {current_start} - {current_end} > \n"
 
         if current_end >= total_lines:
             break
