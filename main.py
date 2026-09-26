@@ -25,7 +25,7 @@ BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 
 # ipv6=False ထည့်သွင်းထားပြီး sleep_threshold တိုးထားသည်
 app = Client(
-    "line_calc_bot", 
+    "line_calc_bot_v2", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN,
