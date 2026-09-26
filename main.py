@@ -13,7 +13,6 @@ from telegram.ext import (
     filters,
     AIORateLimiter
 )
-from telegram.error import RetryAfter
 
 # Render Health Check Web Server
 web_app = Flask('')
@@ -24,6 +23,7 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
+    print(f">>> STARTING FLASK WEB SERVER ON PORT {port} <<<", flush=True)
     web_app.run(host='0.0.0.0', port=port)
 
 BOT_TOKEN = "8167308959:AAGe5PLSa3rB43o7SIk8CyvPFCJ9QHuedMo"
@@ -35,18 +35,19 @@ def count_srt_blocks(file_path):
     return len(matches)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f">>> [LOG] /start received from user: {update.effective_user.id} <<<", flush=True)
     await update.message.reply_text("👋 Bot အလုပ်လုပ်နေပါပြီ ခင်ဗျာ။ စာဖိုင် (.srt သို့မဟုတ် .txt) ပို့ပေးနိုင်ပါပြီ။")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
     file_name = doc.file_name or "file.srt"
+    print(f">>> [LOG] Document received: {file_name} <<<", flush=True)
     
     if not (file_name.lower().endswith('.txt') or file_name.lower().endswith('.srt')):
         await update.message.reply_text("❌ `.txt` သို့မဟုတ် `.srt` စာဖိုင်များကိုသာ ပို့ပေးပါ ခင်ဗျာ။")
         return
 
     status_msg = await update.message.reply_text("📖 စာဖိုင်ထဲက စာကြောင်းရေကို စစ်ဆေးနေပါသည်...")
-    
     download_path = f"temp_{doc.file_unique_id}_{file_name}"
     
     try:
@@ -59,7 +60,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(download_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = len([line for line in f.readlines() if line.strip()])
 
-        # Safe Markdown escape
         safe_name = file_name.replace('`', '')
         reply_text = (
             f"📄 **FILENAME:** `{safe_name}`\n"
@@ -67,15 +67,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💡 **လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?**\n"
             f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - `5`) လို့ ရိုက်ထည့်ပေးပါ။"
         )
-        
-        # Message ကို edit လုပ်ခြင်းဖြင့် request ၂ ကြိမ် မဖြစ်အောင် ထိန်းခြင်း
         await status_msg.edit_text(reply_text, parse_mode="Markdown")
 
-    except RetryAfter as e:
-        await asyncio.sleep(e.retry_after)
-        await update.message.reply_text("⏳ စက္ကန့်ပိုင်းခေတ္တစောင့်ပြီး ပြန်လည် စမ်းသပ်ပေးပါ ခင်ဗျာ။")
     except Exception as e:
-        print(f"[ERROR in document handler]: {repr(e)}", flush=True)
+        print(f">>> [ERROR in document]: {str(e)} <<<", flush=True)
         try:
             await status_msg.edit_text(f"❌ Error ဖြစ်ပွားပါသည်: {str(e)}")
         except Exception:
@@ -140,11 +135,15 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await msg.reply_text(result_msg, parse_mode="Markdown")
 
-def main():
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f">>> [TELEGRAM EXCEPTION]: {context.error} <<<", flush=True)
+
+if __name__ == "__main__":
+    # Flask Server ကို Background Daemon Thread ဖြင့် ဦးစွာ Run ပါသည်
     t = Thread(target=run_web, daemon=True)
     t.start()
 
-    # Rate Limiter ထည့်သွင်းထားသောကြောင့် Flood Control ကို အလိုအလျောက် ထိန်းပေးပါသည်
+    # Telegram Bot Polling ကို Main Thread ပေါ်တွင် တင်ပါသည်
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
@@ -155,9 +154,7 @@ def main():
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, handle_reply))
+    app.add_error_handler(error_handler)
 
-    print(">>> BOT STARTED SUCCESSFULLY <<<", flush=True)
+    print(">>> TELEGRAM POLLING STARTED SUCCESSFULLY <<<", flush=True)
     app.run_polling(drop_pending_updates=True)
-
-if __name__ == "__main__":
-    main()
