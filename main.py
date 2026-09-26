@@ -1,10 +1,19 @@
 import os
 import re
 import math
+import asyncio
 from flask import Flask
 from threading import Thread
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, 
+    CommandHandler, 
+    MessageHandler, 
+    ContextTypes, 
+    filters,
+    AIORateLimiter
+)
+from telegram.error import RetryAfter
 
 # Render Health Check Web Server
 web_app = Flask('')
@@ -17,7 +26,6 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
-# Telegram Bot Token
 BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 
 def count_srt_blocks(file_path):
@@ -26,49 +34,56 @@ def count_srt_blocks(file_path):
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
-# /start command handler
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Bot အလုပ်လုပ်နေပါပြီ ခင်ဗျာ။ စာဖိုင် (.srt သို့မဟုတ် .txt) ပို့ပေးနိုင်ပါပြီ။")
 
-# Document (.srt / .txt) handler
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
-    file_name = doc.file_name or ""
+    file_name = doc.file_name or "file.srt"
     
-    if not (file_name.endswith('.txt') or file_name.endswith('.srt')):
+    if not (file_name.lower().endswith('.txt') or file_name.lower().endswith('.srt')):
         await update.message.reply_text("❌ `.txt` သို့မဟုတ် `.srt` စာဖိုင်များကိုသာ ပို့ပေးပါ ခင်ဗျာ။")
         return
 
-    status_msg = await update.message.reply_text("📖 စာဖိုင်ထဲက စာကြောင်းရေကို သေချာ ရေတွက်နေပါသည်...")
+    status_msg = await update.message.reply_text("📖 စာဖိုင်ထဲက စာကြောင်းရေကို စစ်ဆေးနေပါသည်...")
     
-    tg_file = await doc.get_file()
     download_path = f"temp_{doc.file_unique_id}_{file_name}"
-    await tg_file.download_to_drive(download_path)
-
+    
     try:
-        if file_name.endswith('.srt'):
+        tg_file = await doc.get_file()
+        await tg_file.download_to_drive(download_path)
+
+        if file_name.lower().endswith('.srt'):
             total_lines = count_srt_blocks(download_path)
         else:
             with open(download_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = len([line for line in f.readlines() if line.strip()])
 
+        # Safe Markdown escape
+        safe_name = file_name.replace('`', '')
         reply_text = (
-            f"📄 **FILENAME:** `{file_name}`\n"
+            f"📄 **FILENAME:** `{safe_name}`\n"
             f"📊 **TOTAL LINES:** `{total_lines}` lines\n\n"
             f"💡 **လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?**\n"
             f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - `5`) လို့ ရိုက်ထည့်ပေးပါ။"
         )
-        await update.message.reply_text(reply_text, parse_mode="Markdown")
-        await status_msg.delete()
+        
+        # Message ကို edit လုပ်ခြင်းဖြင့် request ၂ ကြိမ် မဖြစ်အောင် ထိန်းခြင်း
+        await status_msg.edit_text(reply_text, parse_mode="Markdown")
 
+    except RetryAfter as e:
+        await asyncio.sleep(e.retry_after)
+        await update.message.reply_text("⏳ စက္ကန့်ပိုင်းခေတ္တစောင့်ပြီး ပြန်လည် စမ်းသပ်ပေးပါ ခင်ဗျာ။")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Error ဖြစ်ပွားပါသည်: {str(e)}")
-
+        print(f"[ERROR in document handler]: {repr(e)}", flush=True)
+        try:
+            await status_msg.edit_text(f"❌ Error ဖြစ်ပွားပါသည်: {str(e)}")
+        except Exception:
+            pass
     finally:
         if os.path.exists(download_path):
             os.remove(download_path)
 
-# Reply Text (Split Calculator) handler
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg.reply_to_message:
@@ -126,18 +141,22 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.reply_text(result_msg, parse_mode="Markdown")
 
 def main():
-    # Flask Health Check ကို Background Thread ဖြင့် run ခြင်း
     t = Thread(target=run_web, daemon=True)
     t.start()
 
-    # python-telegram-bot Application စတင်ခြင်း
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Rate Limiter ထည့်သွင်းထားသောကြောင့် Flood Control ကို အလိုအလျောက် ထိန်းပေးပါသည်
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .rate_limiter(AIORateLimiter(overall_max_rate=30, overall_time_period=1))
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, handle_reply))
 
-    print(">>> BOT STARTED SUCCESSFULLY VIA HTTPS POLLING <<<", flush=True)
+    print(">>> BOT STARTED SUCCESSFULLY <<<", flush=True)
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
