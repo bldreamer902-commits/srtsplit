@@ -138,16 +138,23 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f">>> [TELEGRAM EXCEPTION]: {context.error} <<<", flush=True)
 
+# ----------------- ဒီနေရာကနေစပြီး ပြင်ဆင်ထားပါသည် -----------------
+
+async def post_init(application):
+    # Bot စတင်ချိန်တိုင်း အရင်ကျန်နေတဲ့ Webhook ကို အလိုအလျောက် အပြီးရှင်းထုတ်ပေးခြင်း
+    print(">>> CLEARING OLD WEBHOOK... <<<", flush=True)
+    await application.bot.delete_webhook(drop_pending_updates=True)
+    print(">>> WEBHOOK CLEARED! READY FOR POLLING <<<", flush=True)
+
 if __name__ == "__main__":
-    # Flask Server ကို Background Daemon Thread ဖြင့် ဦးစွာ Run ပါသည်
     t = Thread(target=run_web, daemon=True)
     t.start()
 
-    # Telegram Bot Polling ကို Main Thread ပေါ်တွင် တင်ပါသည်
     app = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .rate_limiter(AIORateLimiter(overall_max_rate=30, overall_time_period=1))
+        .post_init(post_init)  # <-- ဒီနေရာမှာ post_init ထည့်သွင်းထားပါသည်
         .build()
     )
 
