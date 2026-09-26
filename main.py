@@ -1,9 +1,10 @@
 import os
 import re
 import math
+import asyncio
 from flask import Flask
 from threading import Thread
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
 # Render Health Check Web Server
@@ -22,22 +23,23 @@ API_ID = 33140158
 API_HASH = "936e6187972a97c9f9b616516f24b61c"
 BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
 
+# ipv6=False ထည့်သွင်းထားပြီး sleep_threshold တိုးထားသည်
 app = Client(
     "line_calc_bot", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN,
-    in_memory=True
+    in_memory=True,
+    ipv6=False,
+    sleep_threshold=60
 )
 
 def count_srt_blocks(file_path):
-    """SRT ဖိုင်ထဲက Subtitle Block အရေအတွက်ကို ရေတွက်ခြင်း"""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
     return len(matches)
 
-# Bot အလုပ်လုပ်/မလုပ် စမ်းသပ်ရန် Start Command
 @app.on_message(filters.command("start"))
 async def start_cmd(client: Client, message: Message):
     print(f"[LOG] /start received from {message.from_user.id}", flush=True)
@@ -134,8 +136,27 @@ async def calculate_line_split(client: Client, message: Message):
 
     await message.reply_text(result_msg)
 
-if __name__ == "__main__":
+async def main():
+    # Flask Server ကို Background Thread မှာ မောင်းနှင်ခြင်း
     t = Thread(target=run_web, daemon=True)
     t.start()
-    print(">>> BOT STARTED SUCCESSFULLY <<<", flush=True)
-    app.run()
+
+    # Bot ကို Reconnect Auto-retry စနစ်ဖြင့် Run ခြင်း
+    while True:
+        try:
+            print(">>> CONNECTING TO TELEGRAM MTPROTO...", flush=True)
+            await app.start()
+            print(">>> BOT CONNECTED & RUNNING 24/7 <<<", flush=True)
+            await idle()
+            await app.stop()
+            break
+        except (asyncio.TimeoutError, TimeoutError, Exception) as err:
+            print(f"[WARN] Connection dropped ({err}). Reconnecting in 5 seconds...", flush=True)
+            try:
+                await app.stop()
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+
+if __name__ == "__main__":
+    asyncio.run(main())
