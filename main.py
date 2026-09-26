@@ -26,7 +26,7 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host='0.0.0.0', port=port)
 
-BOT_TOKEN = "8167308959:AAE_dgMyyY7RxGAGKrlWCTrmkW8IutCWN8o"
+BOT_TOKEN = "8167308959:AAGe5PLSa3rB43o7SIk8CyvPFCJ9QHuedMo"
 
 def count_srt_blocks(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
