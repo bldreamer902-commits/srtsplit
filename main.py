@@ -1,6 +1,7 @@
 import os
 import re
 import math
+import html
 import asyncio
 from flask import Flask
 from threading import Thread
@@ -44,7 +45,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f">>> [LOG] Document received: {file_name} <<<", flush=True)
     
     if not (file_name.lower().endswith('.txt') or file_name.lower().endswith('.srt')):
-        await update.message.reply_text("❌ `.txt` သို့မဟုတ် `.srt` စာဖိုင်များကိုသာ ပို့ပေးပါ ခင်ဗျာ။")
+        await update.message.reply_text("❌ .txt သို့မဟုတ် .srt စာဖိုင်များကိုသာ ပို့ပေးပါ ခင်ဗျာ။")
         return
 
     status_msg = await update.message.reply_text("📖 စာဖိုင်ထဲက စာကြောင်းရေကို စစ်ဆေးနေပါသည်...")
@@ -60,14 +61,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             with open(download_path, 'r', encoding='utf-8', errors='ignore') as f:
                 total_lines = len([line for line in f.readlines() if line.strip()])
 
-        safe_name = file_name.replace('`', '')
+        # HTML Escape သုံးခြင်းဖြင့် Underscore / Special Characters များကို Safe ဖြစ်စေသည်
+        safe_name = html.escape(file_name)
         reply_text = (
-            f"📄 **FILENAME:** `{safe_name}`\n"
-            f"📊 **TOTAL LINES:** `{total_lines}` lines\n\n"
-            f"💡 **လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?**\n"
-            f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - `5`) လို့ ရိုက်ထည့်ပေးပါ။"
+            f"📄 <b>FILENAME:</b> <code>{safe_name}</code>\n"
+            f"📊 <b>TOTAL LINES:</b> <code>{total_lines}</code> lines\n\n"
+            f"💡 <b>လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?</b>\n"
+            f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - <code>5</code>) လို့ ရိုက်ထည့်ပေးပါ။"
         )
-        await status_msg.edit_text(reply_text, parse_mode="Markdown")
+        await status_msg.edit_text(reply_text, parse_mode="HTML")
 
     except Exception as e:
         print(f">>> [ERROR in document]: {str(e)} <<<", flush=True)
@@ -98,10 +100,10 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("❌ လူဦးရေသည် 1 ယောက်ထက် ပိုရပါမည်။")
         return
 
-    file_name_match = re.search(r"FILENAME:\s*`?([^`\n]+)`?", replied_text)
+    file_name_match = re.search(r"FILENAME:\s*([^\n]+)", replied_text)
     file_name = file_name_match.group(1).strip() if file_name_match else "Subtitle File"
 
-    match = re.search(r"TOTAL LINES:\s*`?(\d+)`?", replied_text)
+    match = re.search(r"TOTAL LINES:\s*(\d+)", replied_text)
     if not match:
         await msg.reply_text("❌ စာကြောင်းရေ တွက်ချက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။")
         return
@@ -109,10 +111,11 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_lines = int(match.group(1))
     lines_per_person = math.ceil(total_lines / num_people)
 
+    safe_name = html.escape(file_name)
     result_msg = (
-        f"🎬 **{file_name}**\n"
+        f"🎬 <b>{safe_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 **Total Lines:** {total_lines} ( ~{lines_per_person} lines / each )\n"
+        f"📊 <b>Total Lines:</b> {total_lines} ( ~{lines_per_person} lines / each )\n"
         f"━━━━━━━━━━━━━━━━━━━\n\n"
     )
 
@@ -126,14 +129,14 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_end = total_lines
 
         label = f"({alphabet[(i - 1) % 26]})"
-        result_msg += f"{label} {current_start} - {current_end} > \n"
+        result_msg += f"{label} {current_start} - {current_end} &gt; \n"
 
         if current_end >= total_lines:
             break
 
         current_start = current_end + 1
 
-    await msg.reply_text(result_msg, parse_mode="Markdown")
+    await msg.reply_text(result_msg, parse_mode="HTML")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     print(f">>> [TELEGRAM EXCEPTION]: {context.error} <<<", flush=True)
