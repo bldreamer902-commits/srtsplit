@@ -80,14 +80,15 @@ def count_nonempty_lines(file_path: Path) -> int:
 
 
 def extract_filename(reply_text: str) -> str:
-    match = re.search(r"FILENAME:\s*<code>(.*?)</code>", reply_text, re.IGNORECASE | re.DOTALL)
+    match = re.search(r"FILENAME:\s*(?:<code>)?([^\n<]+?)(?:</code>)?(?:\n|$)", reply_text, re.IGNORECASE)
     if match:
         return html.unescape(match.group(1))
     return "Subtitle File"
 
 
 def extract_total_lines(reply_text: str):
-    match = re.search(r"TOTAL LINES:\s*<code>(\d+)</code>", reply_text, re.IGNORECASE)
+    # Telegram returns message.text without HTML tags; support both raw text and markup.
+    match = re.search(r"TOTAL LINES:\s*(?:<code>)?(\d+)(?:</code>)?", reply_text, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
