@@ -1,4 +1,2 @@
-pyrogram
-tgcrypto
-flask
-python-telegram-bot[rate-limiter]
+python-telegram-bot[rate-limiter]==22.8
+Flask==3.1.2
