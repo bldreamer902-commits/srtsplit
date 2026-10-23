@@ -1,170 +1,254 @@
+import html
+import logging
+import math
 import os
 import re
-import math
-import html
-import asyncio
-from flask import Flask
+import tempfile
+from pathlib import Path
 from threading import Thread
+
+from flask import Flask
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import (
-    ApplicationBuilder, 
-    CommandHandler, 
-    MessageHandler, 
-    ContextTypes, 
+    AIORateLimiter,
+    Application,
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
     filters,
-    AIORateLimiter
 )
 
-# Render Health Check Web Server
-web_app = Flask('')
+# -------------------- Configuration --------------------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is missing")
 
-@web_app.route('/')
+MAX_FILE_SIZE = int(os.environ.get("MAX_FILE_SIZE", 20 * 1024 * 1024))
+MAX_PEOPLE = int(os.environ.get("MAX_PEOPLE", 100))
+PORT = int(os.environ.get("PORT", "10000"))
+DROP_PENDING_UPDATES = os.environ.get("DROP_PENDING_UPDATES", "false").lower() == "true"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    force=True,
+)
+logger = logging.getLogger("srtsplit")
+
+# -------------------- Health-check web server --------------------
+web_app = Flask(__name__)
+
+
+@web_app.get("/")
 def home():
-    return "Bot is alive and running 24/7!"
+    return "Bot is alive and running!", 200
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    print(f">>> STARTING FLASK WEB SERVER ON PORT {port} <<<", flush=True)
-    web_app.run(host='0.0.0.0', port=port)
 
-BOT_TOKEN = "8167308959:AAGe5PLSa3rB43o7SIk8CyvPFCJ9QHuedMo"
+@web_app.get("/health")
+def health():
+    return {"status": "ok"}, 200
 
-def count_srt_blocks(file_path):
-    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
-    matches = re.findall(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', content)
-    return len(matches)
 
+def run_web_server():
+    logger.info("Starting health server on 0.0.0.0:%s", PORT)
+    # This server is only for the hosting platform health check.
+    web_app.run(host="0.0.0.0", port=PORT, threaded=True, use_reloader=False)
+
+
+# -------------------- File helpers --------------------
+SRT_TIMING_RE = re.compile(
+    r"\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*"
+    r"\d{2}:\d{2}:\d{2}[,.]\d{3}"
+)
+
+
+def count_srt_blocks(file_path: Path) -> int:
+    """Count SRT subtitle blocks without loading the whole file into RAM."""
+    count = 0
+    with file_path.open("r", encoding="utf-8", errors="replace") as file:
+        for line in file:
+            if SRT_TIMING_RE.search(line):
+                count += 1
+    return count
+
+
+def count_nonempty_lines(file_path: Path) -> int:
+    with file_path.open("r", encoding="utf-8", errors="replace") as file:
+        return sum(1 for line in file if line.strip())
+
+
+def extract_filename(reply_text: str) -> str:
+    match = re.search(r"FILENAME:\s*<code>(.*?)</code>", reply_text, re.IGNORECASE | re.DOTALL)
+    if match:
+        return html.unescape(match.group(1))
+    return "Subtitle File"
+
+
+def extract_total_lines(reply_text: str):
+    match = re.search(r"TOTAL LINES:\s*<code>(\d+)</code>", reply_text, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+# -------------------- Telegram handlers --------------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f">>> [LOG] /start received from user: {update.effective_user.id} <<<", flush=True)
-    await update.message.reply_text("👋 Bot အလုပ်လုပ်နေပါပြီ ခင်ဗျာ။ စာဖိုင် (.srt သို့မဟုတ် .txt) ပို့ပေးနိုင်ပါပြီ။")
+    if update.effective_user:
+        logger.info("/start received from user_id=%s", update.effective_user.id)
+    await update.message.reply_text(
+        "Bot အလုပ်လုပ်နေပါပြီ။ .srt သို့မဟုတ် .txt ဖိုင် ပို့ပေးနိုင်ပါပြီ။"
+    )
+
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    doc = update.message.document
-    file_name = doc.file_name or "file.srt"
-    print(f">>> [LOG] Document received: {file_name} <<<", flush=True)
-    
-    if not (file_name.lower().endswith('.txt') or file_name.lower().endswith('.srt')):
-        await update.message.reply_text("❌ .txt သို့မဟုတ် .srt စာဖိုင်များကိုသာ ပို့ပေးပါ ခင်ဗျာ။")
+    message = update.effective_message
+    if not message or not message.document:
         return
 
-    status_msg = await update.message.reply_text("📖 စာဖိုင်ထဲက စာကြောင်းရေကို စစ်ဆေးနေပါသည်...")
-    download_path = f"temp_{doc.file_unique_id}_{file_name}"
-    
+    document = message.document
+    original_name = document.file_name or "file.srt"
+    file_name = Path(original_name).name
+    lower_name = file_name.lower()
+    logger.info("Document received: %s, size=%s", file_name, document.file_size)
+
+    if not lower_name.endswith((".srt", ".txt")):
+        await message.reply_text(".srt သို့မဟုတ် .txt ဖိုင်များကိုသာ ပို့ပေးပါ။")
+        return
+
+    if document.file_size and document.file_size > MAX_FILE_SIZE:
+        await message.reply_text(
+            f"ဖိုင်အရွယ်အစား ကြီးလွန်းပါတယ်။ {MAX_FILE_SIZE // (1024 * 1024)} MB အောက်သာ ပို့ပေးပါ။"
+        )
+        return
+
+    status_message = await message.reply_text("ဖိုင်ကို download လုပ်ပြီး စာကြောင်းရေတွက်နေပါတယ်...")
+    temp_path = None
+
     try:
-        tg_file = await doc.get_file()
-        await tg_file.download_to_drive(download_path)
+        await message.chat.send_action(ChatAction.TYPING)
+        telegram_file = await document.get_file()
+        logger.info("Telegram file info received: %s", file_name)
 
-        if file_name.lower().endswith('.srt'):
-            total_lines = count_srt_blocks(download_path)
+        with tempfile.NamedTemporaryFile(prefix="srtsplit_", suffix=Path(file_name).suffix, delete=False) as temp:
+            temp_path = Path(temp.name)
+
+        await telegram_file.download_to_drive(custom_path=str(temp_path))
+        actual_size = temp_path.stat().st_size
+        logger.info("Download completed: %s bytes, path=%s", actual_size, temp_path)
+
+        if actual_size > MAX_FILE_SIZE:
+            raise ValueError("Downloaded file is larger than the configured limit")
+
+        if lower_name.endswith(".srt"):
+            total_lines = count_srt_blocks(temp_path)
         else:
-            with open(download_path, 'r', encoding='utf-8', errors='ignore') as f:
-                total_lines = len([line for line in f.readlines() if line.strip()])
+            total_lines = count_nonempty_lines(temp_path)
 
-        # HTML Escape သုံးခြင်းဖြင့် Underscore / Special Characters များကို Safe ဖြစ်စေသည်
+        logger.info("Counting completed: file=%s total_lines=%s", file_name, total_lines)
         safe_name = html.escape(file_name)
         reply_text = (
             f"📄 <b>FILENAME:</b> <code>{safe_name}</code>\n"
             f"📊 <b>TOTAL LINES:</b> <code>{total_lines}</code> lines\n\n"
-            f"💡 <b>လူဘယ်နှစ်ယောက် ခွဲချင်တာလဲ?</b>\n"
-            f"ဒီစာကို Reply ပြန်ပြီး လူဦးရေ ဂဏန်း (ဥပမာ - <code>5</code>) လို့ ရိုက်ထည့်ပေးပါ။"
+            "လူဘယ်နှစ်ယောက်ခွဲချင်ပါသလဲ?\n"
+            "ဒီစာကို Reply ပြန်ပြီး ဂဏန်း (ဥပမာ - <code>5</code>) ရိုက်ထည့်ပါ။"
         )
-        await status_msg.edit_text(reply_text, parse_mode="HTML")
+        await status_message.edit_text(reply_text, parse_mode="HTML")
+        logger.info("Reply sent successfully: file=%s", file_name)
 
-    except Exception as e:
-        print(f">>> [ERROR in document]: {str(e)} <<<", flush=True)
+    except Exception:
+        logger.exception("Document processing failed: %s", file_name)
         try:
-            await status_msg.edit_text(f"❌ Error ဖြစ်ပွားပါသည်: {str(e)}")
+            await status_message.edit_text(
+                "ဖိုင်ကို ပြင်ဆင်ရာမှာ အမှားဖြစ်သွားပါတယ်။ ဖိုင်သေးသေးတစ်ခုနဲ့ ထပ်စမ်းပေးပါ။"
+            )
         except Exception:
-            pass
+            logger.exception("Could not edit status message")
     finally:
-        if os.path.exists(download_path):
-            os.remove(download_path)
+        if temp_path:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                logger.exception("Could not remove temporary file: %s", temp_path)
+
 
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg.reply_to_message:
+    message = update.effective_message
+    if not message or not message.reply_to_message or not message.text:
         return
 
-    replied_text = msg.reply_to_message.text or msg.reply_to_message.caption or ""
+    replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
     if "TOTAL LINES:" not in replied_text:
         return
 
-    num_text = msg.text.strip()
-    if not num_text.isdigit():
-        await msg.reply_text("❌ ကျေးဇူးပြု၍ လူဦးရေ ဂဏန်းသန့်သန့် (ဥပမာ- 2, 3, 5) သာ ရိုက်ထည့်ပေးပါ ခင်ဗျာ။")
+    number_text = message.text.strip()
+    if not number_text.isdigit():
+        await message.reply_text("လူဦးရေကို ဂဏန်းသန့်သန့်သာ ရိုက်ထည့်ပါ။ ဥပမာ - 2, 3, 5")
         return
 
-    num_people = int(num_text)
-    if num_people <= 0:
-        await msg.reply_text("❌ လူဦးရေသည် 1 ယောက်ထက် ပိုရပါမည်။")
+    people = int(number_text)
+    total_lines = extract_total_lines(replied_text)
+    if people <= 0 or people > MAX_PEOPLE:
+        await message.reply_text(f"လူဦးရေကို 1 မှ {MAX_PEOPLE} အတွင်း ထည့်ပေးပါ။")
+        return
+    if total_lines is None:
+        await message.reply_text("စာကြောင်းရေကို ဖတ်မရပါ။ ဖိုင်ကို ပြန်ပို့ပြီး ထပ်စမ်းပါ။")
+        return
+    if total_lines <= 0:
+        await message.reply_text("ဖိုင်ထဲမှာ subtitle စာကြောင်း မတွေ့ပါ။")
         return
 
-    file_name_match = re.search(r"FILENAME:\s*([^\n]+)", replied_text)
-    file_name = file_name_match.group(1).strip() if file_name_match else "Subtitle File"
-
-    match = re.search(r"TOTAL LINES:\s*(\d+)", replied_text)
-    if not match:
-        await msg.reply_text("❌ စာကြောင်းရေ တွက်ချက်ရာတွင် အမှားအယွင်းရှိနေပါသည်။")
-        return
-
-    total_lines = int(match.group(1))
-    lines_per_person = math.ceil(total_lines / num_people)
-
-    safe_name = html.escape(file_name)
-    result_msg = (
-        f"🎬 <b>{safe_name}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 <b>Total Lines:</b> {total_lines} ( ~{lines_per_person} lines / each )\n"
-        f"━━━━━━━━━━━━━━━━━━━\n\n"
-    )
+    file_name = html.escape(extract_filename(replied_text))
+    per_person = math.ceil(total_lines / people)
+    result = [
+        f"🎬 <b>{file_name}</b>",
+        "━━━━━━━━━━━━━━━━━━━",
+        f"📊 <b>Total Lines:</b> {total_lines} (~{per_person} lines each)",
+        "━━━━━━━━━━━━━━━━━━━",
+        "",
+    ]
 
     alphabet = "abcdefghijklmnopqrstuvwxyz"
-    current_start = 1
-
-    for i in range(1, num_people + 1):
-        current_end = current_start + lines_per_person - 1
-        
-        if i == num_people or current_end > total_lines:
-            current_end = total_lines
-
-        label = f"({alphabet[(i - 1) % 26]})"
-        result_msg += f"{label} {current_start} - {current_end} &gt; \n"
-
-        if current_end >= total_lines:
+    for index in range(people):
+        start = index * per_person + 1
+        end = min((index + 1) * per_person, total_lines)
+        if start > total_lines:
             break
+        label = alphabet[index] if index < len(alphabet) else str(index + 1)
+        result.append(f"({label}) {start} - {end} &gt;")
 
-        current_start = current_end + 1
+    await message.reply_text("\n".join(result), parse_mode="HTML")
 
-    await msg.reply_text(result_msg, parse_mode="HTML")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f">>> [TELEGRAM EXCEPTION]: {context.error} <<<", flush=True)
+    logger.error("Telegram handler error: %r", context.error, exc_info=context.error)
 
-# ----------------- ဒီနေရာကနေစပြီး ပြင်ဆင်ထားပါသည် -----------------
 
-async def post_init(application):
-    # Bot စတင်ချိန်တိုင်း အရင်ကျန်နေတဲ့ Webhook ကို အလိုအလျောက် အပြီးရှင်းထုတ်ပေးခြင်း
-    print(">>> CLEARING OLD WEBHOOK... <<<", flush=True)
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    print(">>> WEBHOOK CLEARED! READY FOR POLLING <<<", flush=True)
+async def post_init(application: Application) -> None:
+    # Polling and webhook cannot be active together. Keep queued messages by default.
+    logger.info("Removing any old Telegram webhook; drop_pending_updates=%s", DROP_PENDING_UPDATES)
+    await application.bot.delete_webhook(drop_pending_updates=DROP_PENDING_UPDATES)
+    logger.info("Webhook cleared; polling is ready")
 
+
+# -------------------- Startup --------------------
 if __name__ == "__main__":
-    t = Thread(target=run_web, daemon=True)
-    t.start()
+    Thread(target=run_web_server, daemon=True, name="health-server").start()
 
-    app = (
+    application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .rate_limiter(AIORateLimiter(overall_max_rate=30, overall_time_period=1))
-        .post_init(post_init)  # <-- ဒီနေရာမှာ post_init ထည့်သွင်းထားပါသည်
+        .post_init(post_init)
         .build()
     )
 
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & filters.REPLY, handle_reply))
-    app.add_error_handler(error_handler)
+    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    application.add_handler(MessageHandler(filters.TEXT & filters.REPLY, handle_reply))
+    application.add_error_handler(error_handler)
 
-    print(">>> TELEGRAM POLLING STARTED SUCCESSFULLY <<<", flush=True)
-    app.run_polling(drop_pending_updates=True)
+    logger.info("Starting Telegram polling")
+    application.run_polling(
+        drop_pending_updates=DROP_PENDING_UPDATES,
+        bootstrap_retries=5,
+    )
